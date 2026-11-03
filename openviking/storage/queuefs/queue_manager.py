@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 DEFAULT_MAX_CONCURRENT_SESSION_COMMIT = 8
+DEFAULT_MAX_BLOCKED_REQUEUES = 8
+DEFAULT_MAX_RECOVERY_REQUEUES = 2
 
 # ========== Singleton Pattern ==========
 _instance: Optional["QueueManager"] = None
@@ -41,6 +43,8 @@ def init_queue_manager(
     max_concurrent_reindex: int = 4,
     max_concurrent_session_commit: int = DEFAULT_MAX_CONCURRENT_SESSION_COMMIT,
     max_concurrent_external_task: int = 10,
+    max_blocked_requeues: int = DEFAULT_MAX_BLOCKED_REQUEUES,
+    max_recovery_requeues: int = DEFAULT_MAX_RECOVERY_REQUEUES,
     *,
     middlewares: Sequence[QueueMiddleware] = (),
 ) -> "QueueManager":
@@ -56,6 +60,8 @@ def init_queue_manager(
         max_concurrent_add_resource: Max concurrent AddResource tasks.
         max_concurrent_reindex: Max concurrent Reindex tasks.
         max_concurrent_session_commit: Max concurrent SessionCommit tasks.
+        max_blocked_requeues: Max blocked path-lock handoff re-enqueues for Semantic.
+        max_recovery_requeues: Max other path-lock recovery re-enqueues for Semantic.
         middlewares: Additional middleware, fixed at construction for all queues.
     """
     global _instance
@@ -70,6 +76,8 @@ def init_queue_manager(
         max_concurrent_reindex=max_concurrent_reindex,
         max_concurrent_session_commit=max_concurrent_session_commit,
         max_concurrent_external_task=max_concurrent_external_task,
+        max_blocked_requeues=max_blocked_requeues,
+        max_recovery_requeues=max_recovery_requeues,
         middlewares=middlewares,
     )
     return _instance
@@ -116,6 +124,8 @@ class QueueManager:
         max_concurrent_reindex: int = 4,
         max_concurrent_session_commit: int = DEFAULT_MAX_CONCURRENT_SESSION_COMMIT,
         max_concurrent_external_task: int = 10,
+        max_blocked_requeues: int = DEFAULT_MAX_BLOCKED_REQUEUES,
+        max_recovery_requeues: int = DEFAULT_MAX_RECOVERY_REQUEUES,
         *,
         middlewares: Sequence[QueueMiddleware] = (),
     ):
@@ -130,6 +140,8 @@ class QueueManager:
         self._max_concurrent_reindex = max_concurrent_reindex
         self._max_concurrent_session_commit = max_concurrent_session_commit
         self._max_concurrent_external_task = max_concurrent_external_task
+        self._max_blocked_requeues = max_blocked_requeues
+        self._max_recovery_requeues = max_recovery_requeues
         self._queues: Dict[str, NamedQueue] = {}
         self._started = False
         self._queue_threads: Dict[str, threading.Thread] = {}
@@ -251,6 +263,8 @@ class QueueManager:
             max_concurrent_llm=self._max_concurrent_semantic,
             embedding_worker_stopped=self._embedding_worker_stopped.is_set,
             vlm_resolver=self._vlm_resolver,
+            max_blocked_requeues=self._max_blocked_requeues,
+            max_recovery_requeues=self._max_recovery_requeues,
         )
         self.get_queue(
             self.SEMANTIC,
@@ -276,6 +290,8 @@ class QueueManager:
                     max_concurrent_llm=self._max_concurrent_semantic,
                     embedding_worker_stopped=self._embedding_worker_stopped.is_set,
                     vlm_resolver=resolver,
+                    max_blocked_requeues=self._max_blocked_requeues,
+                    max_recovery_requeues=self._max_recovery_requeues,
                 )
             )
 

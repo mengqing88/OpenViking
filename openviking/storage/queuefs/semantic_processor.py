@@ -54,7 +54,10 @@ from openviking.storage.errors import (
     LockAcquisitionError,
 )
 from openviking.storage.index_action import FieldPatch
-from openviking.storage.pathlock_recovery import prepare_handoff_retry
+from openviking.storage.pathlock_recovery import (
+    HANDOFF_RECOVERY_MAX_RETRIES,
+    prepare_handoff_retry,
+)
 from openviking.storage.pathlock_transfer import PathLockGuard
 from openviking.storage.queuefs.named_queue import DequeueHandlerBase
 from openviking.storage.queuefs.process_result import ProcessResult
@@ -155,6 +158,8 @@ class SemanticProcessor(DequeueHandlerBase):
         *,
         embedding_worker_stopped: Optional[Callable[[], bool]] = None,
         vlm_resolver: Optional["VLMResolver"] = None,
+        max_blocked_requeues: int = HANDOFF_RECOVERY_MAX_RETRIES,
+        max_recovery_requeues: int = 2,
     ):
         """
         Initialize SemanticProcessor.
@@ -168,6 +173,8 @@ class SemanticProcessor(DequeueHandlerBase):
         self._breaker_lock = threading.Lock()
         self._embedding_worker_stopped = embedding_worker_stopped
         self._vlm_resolver = vlm_resolver
+        self._max_blocked_requeues = max_blocked_requeues
+        self._max_recovery_requeues = max_recovery_requeues
 
     def _account_breaker(self, account_id: str) -> CircuitBreaker:
         with self._breaker_lock:
@@ -363,13 +370,18 @@ class SemanticProcessor(DequeueHandlerBase):
         *,
         work: SemanticMessageWork,
     ) -> ProcessResult:
-        if isinstance(error, HandoffRecoveryBlocked):
-            payload = await prepare_handoff_retry(msg, error, queue="Semantic")
-            if payload is None:
-                self._merge_request_stats(msg.telemetry_id, error_count=1)
-                await self._cleanup_local_artifact(msg)
-                return ProcessResult.failed(f"Pathlock recovery retry limit reached: {error}")
-            msg.lock_handoff_retry = payload["lock_handoff_retry"]
+        payload = await prepare_handoff_retry(
+            msg,
+            error,
+            queue="Semantic",
+            max_blocked_requeues=self._max_blocked_requeues,
+            max_recovery_requeues=self._max_recovery_requeues,
+        )
+        if payload is None:
+            self._merge_request_stats(msg.telemetry_id, error_count=1)
+            await self._cleanup_local_artifact(msg)
+            return ProcessResult.failed(f"Pathlock recovery retry limit reached: {error}")
+        msg.lock_handoff_retry = payload["lock_handoff_retry"]
         try:
             await work.reenqueue_after_error()
             self._merge_request_stats(msg.telemetry_id, requeue_count=1)

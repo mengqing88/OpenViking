@@ -16,7 +16,11 @@ from openviking.service.task_work_index import (
     bind_task_context_from_message,
     extract_task_metadata,
 )
-from openviking.storage.pathlock_recovery import adopt_or_reacquire, prepare_handoff_retry
+from openviking.storage.pathlock_recovery import (
+    HANDOFF_RECOVERY_MAX_RETRIES,
+    adopt_or_reacquire,
+    prepare_handoff_retry,
+)
 from openviking.storage.pathlock_transfer import PathLockGuard
 from openviking.storage.queuefs.add_resource_msg import AddResourceMsg
 from openviking.storage.queuefs.named_queue import DequeueHandlerBase
@@ -45,10 +49,15 @@ class AddResourceProcessor(DequeueHandlerBase):
         resource_service: Any,
         queue_name: str,
         viking_fs: Any,
+        *,
+        max_blocked_requeues: int = HANDOFF_RECOVERY_MAX_RETRIES,
+        max_recovery_requeues: int = 2,
     ):
         self._resource_service = resource_service
         self._queue_name = queue_name
         self._viking_fs = viking_fs
+        self._max_blocked_requeues = max_blocked_requeues
+        self._max_recovery_requeues = max_recovery_requeues
 
     async def _load_lock(self, msg: AddResourceMsg, ctx: RequestContext) -> Any:
         """Adopt a pathlock handoff ref, returning an owned lease dict."""
@@ -142,7 +151,13 @@ class AddResourceProcessor(DequeueHandlerBase):
         await self._record_watch_execution(msg, "cancelled")
 
     async def _requeue_lock_handoff(self, msg: AddResourceMsg, exc: Exception) -> bool:
-        payload = await prepare_handoff_retry(msg, exc, queue="AddResource")
+        payload = await prepare_handoff_retry(
+            msg,
+            exc,
+            queue="AddResource",
+            max_blocked_requeues=self._max_blocked_requeues,
+            max_recovery_requeues=self._max_recovery_requeues,
+        )
         if payload is None:
             return False
 

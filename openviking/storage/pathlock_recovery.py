@@ -23,7 +23,14 @@ HANDOFF_RECOVERY_MAX_RETRIES = 8
 HANDOFF_RECOVERY_MAX_DELAY_SECS = 30.0
 
 
-async def prepare_handoff_retry(msg: Any, error: Exception, *, queue: str) -> dict | None:
+async def prepare_handoff_retry(
+    msg: Any,
+    error: Exception,
+    *,
+    queue: str,
+    max_blocked_requeues: int = HANDOFF_RECOVERY_MAX_RETRIES,
+    max_recovery_requeues: int = 2,
+) -> dict | None:
     """Bound recovery retries; keep the original delivery durable during backoff.
 
     The incremented counter is persisted in the replacement message. If waiting
@@ -31,7 +38,7 @@ async def prepare_handoff_retry(msg: Any, error: Exception, *, queue: str) -> di
     """
     retry = msg.lock_handoff_retry
     blocked = isinstance(error, HandoffRecoveryBlocked)
-    limit = HANDOFF_RECOVERY_MAX_RETRIES if blocked else 2
+    limit = max_blocked_requeues if blocked else max_recovery_requeues
     exhausted = retry >= limit
     if blocked:
         EventMetricDataSource._emit(

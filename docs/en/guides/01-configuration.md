@@ -2340,6 +2340,31 @@ Delivery is best-effort: sink errors and timeouts are logged, and phase-2 replay
 
 For startup and deployment details see [Deployment](./03-deployment.md), for authentication see [Authentication](./04-authentication.md).
 
+## Queue worker path-lock retry limits
+
+`ExternalParse`, `AddResource`, `Reindex`, `ContentWrite`, and `Semantic` preserve their
+delivery while they re-acquire a durable path-lock handoff. They share one
+deployment-wide retry policy:
+
+```json
+{
+  "queue_workers": {
+    "requeue": {
+      "max_blocked_requeues": 8,
+      "max_recovery_requeues": 2
+    }
+  }
+}
+```
+
+`max_blocked_requeues` applies when fresh path-lock coverage is still held by
+another operation; it uses exponential backoff before each replacement
+delivery. `max_recovery_requeues` applies to other path-lock handoff recovery
+failures. Both accept integers greater than or equal to zero; `0` settles the
+task as failed on its first matching failure. They limit queue delivery
+replacement, not model-provider `max_retries`, and apply uniformly to all
+five consumers.
+
 ## storage.transaction Section
 
 `storage.transaction` is deprecated and kept only for legacy compatibility. Use `storage.agfs.pathlock` for the active PathLock provider and expiry configuration; Redis key names come from top-level `service_name`. When legacy fields are still present, OpenViking logs a warning at runtime; `lock_timeout` is deprecated and ignored, `lock_expire` is automatically mapped when the new field is unset, and `redo_recovery_enabled` is ignored.

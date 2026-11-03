@@ -2388,6 +2388,23 @@ Redis 连接和命令超时分别通过 `cache.params.connect_timeout_ms` 和
 
 加密功能的详细说明见 [数据加密](../concepts/10-encryption.md)，完整使用流程见 [加密指南](./08-encryption.md)。
 
+## 队列 Worker 的路径锁重入队上限
+
+`ExternalParse`、`AddResource`、`Reindex`、`ContentWrite` 和 `Semantic` 在重新获取持久化的路径锁交接时，会保留原有投递并创建替代投递。它们共享同一份部署级重入队策略：
+
+```json
+{
+  "queue_workers": {
+    "requeue": {
+      "max_blocked_requeues": 8,
+      "max_recovery_requeues": 2
+    }
+  }
+}
+```
+
+`max_blocked_requeues` 用于新的路径锁覆盖仍被其它操作持有的情况；每次允许的替代投递前会指数退避。`max_recovery_requeues` 用于其它路径锁交接恢复失败。两者均接受大于等于 `0` 的整数；设为 `0` 时，首次对应失败即将任务置为失败。它们控制的是队列投递替换次数，不是模型 Provider 的 `max_retries`，并统一作用于这五个消费者。
+
 ## storage.transaction 段
 
 `storage.transaction` 已废弃，仅保留为兼容旧配置。新配置请使用 `storage.agfs.pathlock` 配置 PathLock Provider 和过期时间；Redis key 名称来自顶层 `service_name`。若旧字段仍然出现，OpenViking 会在运行时给出 warning；其中 `lock_timeout` 已废弃且会被忽略，`lock_expire` 会在未显式配置新字段时自动映射到新的 `pathlock` 配置，`redo_recovery_enabled` 则会被忽略。

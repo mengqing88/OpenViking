@@ -31,6 +31,21 @@ class AddResourceQueueWorkerConfig(QueueWorkerConfig):
     )
 
 
+class QueueRequeueConfig(BaseModel):
+    """Shared re-enqueue limits for QueueFS consumers."""
+
+    max_blocked_requeues: int = Field(
+        default=8,
+        ge=0,
+        description="Maximum re-enqueues when a path-lock handoff is blocked by another holder.",
+    )
+    max_recovery_requeues: int = Field(
+        default=2,
+        ge=0,
+        description="Maximum re-enqueues for other path-lock handoff recovery failures.",
+    )
+
+
 class QueueWorkersConfig(BaseModel):
     """Runtime limits for QueueFS consumers."""
 
@@ -43,3 +58,4 @@ class QueueWorkersConfig(BaseModel):
     external_task: QueueWorkerConfig = Field(
         default_factory=lambda: QueueWorkerConfig(max_concurrent=10)
     )
+    requeue: QueueRequeueConfig = Field(default_factory=QueueRequeueConfig)

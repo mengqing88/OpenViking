@@ -135,6 +135,8 @@ def test_runtime_concurrency_uses_scope_specific_defaults():
     assert config.queue_workers.add_resource.file_vectorization_concurrency == 8
     assert config.queue_workers.session_commit.max_concurrent == 8
     assert config.queue_workers.external_task.max_concurrent == 10
+    assert config.queue_workers.requeue.max_blocked_requeues == 8
+    assert config.queue_workers.requeue.max_recovery_requeues == 2
     assert config.reindex.file_vectorization_concurrency == 8
 
 
@@ -158,6 +160,10 @@ def test_runtime_concurrency_accepts_separate_values():
                 "reindex": {"max_concurrent": 6},
                 "session_commit": {"max_concurrent": 50},
                 "external_task": {"max_concurrent": 11},
+                "requeue": {
+                    "max_blocked_requeues": 5,
+                    "max_recovery_requeues": 3,
+                },
             },
             "reindex": {"file_vectorization_concurrency": 16},
         }
@@ -170,6 +176,8 @@ def test_runtime_concurrency_accepts_separate_values():
     assert config.queue_workers.add_resource.file_vectorization_concurrency == 12
     assert config.queue_workers.session_commit.max_concurrent == 50
     assert config.queue_workers.external_task.max_concurrent == 11
+    assert config.queue_workers.requeue.max_blocked_requeues == 5
+    assert config.queue_workers.requeue.max_recovery_requeues == 3
     assert config.reindex.file_vectorization_concurrency == 16
 
 
@@ -179,6 +187,14 @@ def test_queue_worker_concurrency_rejects_non_positive_value(value):
         QueueWorkersConfig(reindex={"max_concurrent": value})
 
     assert exc_info.value.errors()[0]["type"] == "greater_than"
+
+
+@pytest.mark.parametrize("field", ["max_blocked_requeues", "max_recovery_requeues"])
+def test_requeue_limits_reject_negative_value(field):
+    with pytest.raises(ValueError) as exc_info:
+        QueueWorkersConfig(requeue={field: -1})
+
+    assert exc_info.value.errors()[0]["type"] == "greater_than_equal"
 
 
 def test_parser_and_compile_api_validation():
